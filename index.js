@@ -3,7 +3,7 @@ var stream = require('stream')
 var fileType = require('file-type')
 var parallel = require('run-parallel')
 
-function staticValue(value) {
+function staticValue (value) {
   return function (req, file, cb) {
     cb(null, value)
   }
@@ -19,13 +19,13 @@ var defaultStorageClass = staticValue('STANDARD')
 var defaultSSE = staticValue(null)
 var defaultSSEKMS = staticValue(null)
 
-function defaultKey(req, file, cb) {
+function defaultKey (req, file, cb) {
   crypto.randomBytes(16, function (err, raw) {
     cb(err, err ? undefined : raw.toString('hex'))
   })
 }
 
-function autoContentType(req, file, cb) {
+function autoContentType (req, file, cb) {
   var type
   var hash = crypto.createHash('sha256')
   var buffer = []
@@ -48,11 +48,11 @@ function autoContentType(req, file, cb) {
   })
 
   file.stream.on('error', function (err) {
-    new TypeError(err)
+    throw new TypeError(err)
   })
 }
 
-function collect(storage, req, file, cb) {
+function collect (storage, req, file, cb) {
   storage.getContentType(req, file, function (err, contentType, replacementStream, hash) {
     if (err) return cb(err)
 
@@ -89,7 +89,7 @@ function collect(storage, req, file, cb) {
   })
 }
 
-function S3Storage(opts) {
+function S3Storage (opts) {
   switch (typeof opts.s3) {
     case 'object': this.s3 = opts.s3; break
     default: throw new TypeError('Expected opts.s3 to be object')
