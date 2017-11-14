@@ -3,7 +3,7 @@ var stream = require('stream')
 var fileType = require('file-type')
 var parallel = require('run-parallel')
 
-function staticValue (value) {
+function staticValue(value) {
   return function (req, file, cb) {
     cb(null, value)
   }
@@ -19,40 +19,57 @@ var defaultStorageClass = staticValue('STANDARD')
 var defaultSSE = staticValue(null)
 var defaultSSEKMS = staticValue(null)
 
-function defaultKey (req, file, cb) {
+function defaultKey(req, file, cb) {
   crypto.randomBytes(16, function (err, raw) {
     cb(err, err ? undefined : raw.toString('hex'))
   })
 }
 
-function autoContentType (req, file, cb) {
+function autoContentType(req, file, cb) {
+  var type
+  var hash = crypto.createHash('sha256')
+  var buffer = []
+
   file.stream.once('data', function (firstChunk) {
-    var type = fileType(firstChunk)
-    var mime = (type === null ? 'application/octet-stream' : type.mime)
+    type = fileType(firstChunk)
+    if (type === null) type = { mime: 'application/octet-stream' }
+  })
+
+  file.stream.on('data', function (chunk) {
+    hash.update(chunk)
+    buffer.push(chunk)
+  })
+
+  file.stream.on('end', function () {
     var outStream = new stream.PassThrough()
+    outStream.end(Buffer.concat(buffer))
 
-    outStream.write(firstChunk)
-    file.stream.pipe(outStream)
+    cb(null, type, outStream, hash.digest('hex'))
+  })
 
-    cb(null, mime, outStream)
+  file.stream.on('error', function (err) {
+    new TypeError(err)
   })
 }
 
-function collect (storage, req, file, cb) {
-  parallel([
-    storage.getBucket.bind(storage, req, file),
-    storage.getKey.bind(storage, req, file),
-    storage.getAcl.bind(storage, req, file),
-    storage.getMetadata.bind(storage, req, file),
-    storage.getCacheControl.bind(storage, req, file),
-    storage.getContentDisposition.bind(storage, req, file),
-    storage.getStorageClass.bind(storage, req, file),
-    storage.getSSE.bind(storage, req, file),
-    storage.getSSEKMS.bind(storage, req, file)
-  ], function (err, values) {
+function collect(storage, req, file, cb) {
+  storage.getContentType(req, file, function (err, contentType, replacementStream, hash) {
     if (err) return cb(err)
 
-    storage.getContentType(req, file, function (err, contentType, replacementStream) {
+    file.magicnumber = contentType
+    file.hash = hash
+
+    parallel([
+      storage.getBucket.bind(storage, req, file),
+      storage.getKey.bind(storage, req, file),
+      storage.getAcl.bind(storage, req, file),
+      storage.getMetadata.bind(storage, req, file),
+      storage.getCacheControl.bind(storage, req, file),
+      storage.getContentDisposition.bind(storage, req, file),
+      storage.getStorageClass.bind(storage, req, file),
+      storage.getSSE.bind(storage, req, file),
+      storage.getSSEKMS.bind(storage, req, file)
+    ], function (err, values) {
       if (err) return cb(err)
 
       cb.call(storage, null, {
@@ -72,7 +89,7 @@ function collect (storage, req, file, cb) {
   })
 }
 
-function S3Storage (opts) {
+function S3Storage(opts) {
   switch (typeof opts.s3) {
     case 'object': this.s3 = opts.s3; break
     default: throw new TypeError('Expected opts.s3 to be object')
@@ -157,7 +174,7 @@ S3Storage.prototype._handleFile = function (req, file, cb) {
       Key: opts.key,
       ACL: opts.acl,
       CacheControl: opts.cacheControl,
-      ContentType: opts.contentType,
+      ContentType: opts.contentType.mime,
       Metadata: opts.metadata,
       StorageClass: opts.storageClass,
       ServerSideEncryption: opts.serverSideEncryption,
